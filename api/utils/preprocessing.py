@@ -94,7 +94,7 @@ def df2sequences(df, training=True, line_df=True, seq_len=64):
         df["Text"] = df["Text"].apply(str)
         if training:
             df["Section"] = df["Section"].apply(int)
-            df = df.groupby("Email").agg({"Text": list,"Section": list})
+            df = df.groupby("Email").agg({"Text": list,"Section": list, "FragmentChanges": list})
         else:
             df = df.groupby("Email").agg({"Text": list})
     else:
@@ -110,6 +110,7 @@ def df2sequences(df, training=True, line_df=True, seq_len=64):
     if training:
         print("Starting label separation".ljust(56, "-"))
         df["Section"] = df.progress_apply(lambda row: list2sequences(row["Section"], padding=0, seq_len=seq_len)[row["Part"]], axis=1)
-        return df[["Email", "Text", "Part", "Section"]]
+        df["FragmentChanges"] = df.progress_apply(lambda row: list2sequences(row["FragmentChanges"], padding=0, seq_len=seq_len)[row["Part"]], axis=1)
+        return df[["Email", "Text", "Part", "Section", "FragmentChanges"]]
     return df[["Email", "Text", "Part"]]
 
