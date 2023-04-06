@@ -1,0 +1,45 @@
+{
+    "default": {
+        "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "features_list": [
+            "phone_number",
+            "url",
+            "punctuation",
+            "horizontal_separator",
+            "hashtag",
+            "pipe",
+            "email",
+            "capitalized",
+            "full_caps"
+        ],
+        "classifier": "multi_miniLM_classifier"
+    },
+    "multi_miniLM_F9_L2": {
+        "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        "features_list": [
+            "phone_number",
+            "url",
+            "punctuation",
+            "horizontal_separator",
+            "hashtag",
+            "pipe",
+            "email",
+            "capitalized",
+            "full_caps"
+        ],
+        "classifier": "multi_miniLM_classifier"
+    },
+    "miniLM_F7_L2": {
+        "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+        "features_list": [
+            "phone_number",
+            "url",
+            "punctuation",
+            "horizontal_separator",
+            "hashtag",
+            "pipe",
+            "email"
+        ],
+        "classifier": "miniLM_classifier"
+    }
+}

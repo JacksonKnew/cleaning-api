@@ -1,37 +1,64 @@
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 from fastapi import FastAPI
-import json
-from typing import List, Optional
-from pydantic import BaseModel
-import utils.preprocessing as pp
-import utils.feature_extraction as fc
-import utils.result_handling as rh
-import utils.model_building as mb
-import utils.cosmetics as cos
+import model.data as data
+import model.pipelining as pipe
+import model.request_classes as rq
 
 app = FastAPI()
 
-model = mb.build_multi_MiniLM_classifier()
+pipeline = pipe.PipelineModel("default")
 
-@app.get("/")
-def welcome():
-    greetings = {"Hello": "world"}
-    return json.dumps(greetings)
 
-class Email(BaseModel):
-    Text: List[str]
+@app.get("/pipeline")
+def get_pipeline():
+    """GET at /pipeline
+    This endpoint serves to get the pipeline used for segmenting emails
+
+    Returns:
+    A json containing the pipeline structure
+    """
+    return pipeline.to_json()
+
+
+@app.put("/pipeline")
+def set_pipeline(pipeline_name: rq.PipelineName):
+    """PUT at /pipeline
+    This endpoint serves to change the pipeline used for segmenting emails
+
+    Expected arguments:
+    - name: name of the pipeline to use from now on
+
+    Returns:
+    A json containing the pipeline structure
+    """
+    pipeline.from_json(pipeline_name)
+    return pipeline.to_json()
+
 
 @app.post("/segment")
-def segmentation(email: Email):
-    email_df = pp.payload2df(email)
-    cos.received_request("POST", "/segment", email_df.shape[0], 56)
-    email_df = pp.df2sequences(email_df, training=False, line_df=False)
-    email_df = fc.create_encoding(email_df)
-    email_df = fc.create_extracted(email_df)
-    feats = fc.create_features(email_df, encoding="Encoding", extracted="Extracted")
-    print("Starting model prediction".ljust(56, "-"))
-    pred = model.predict(feats)
-    result = rh.pred2fragdic(pred, email_df)
-    return json.dumps(result)
+def segmentation(email: rq.ThreadList):
+    """POST at /segment
+    This endpoint serves to segment a list of emails
 
+    Expected arguments:
+    - threads: list of emails in the form of single character strings
+
+    Returns:
+    - threads: list of
+        - thread:
+            - source: source text of the email, untreated
+            - messages:
+                - message:
+                    - header
+                    - disclaimer
+                    - greetings
+                    - body
+                    - signature
+                    - caution
+    """
+    dataset = data.EmailDataset.from_json(email)
+    dataset.segment(pipeline)
+    return dataset.to_json()
