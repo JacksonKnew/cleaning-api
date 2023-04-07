@@ -3,13 +3,12 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 from fastapi import FastAPI
-import model.data as data
-import model.pipelining as pipe
+import control.control as ctrl
 import model.request_classes as rq
 
 app = FastAPI()
 
-pipeline = pipe.PipelineModel("default")
+controller = ctrl.Controller()
 
 
 @app.get("/pipeline")
@@ -20,7 +19,7 @@ def get_pipeline():
     Returns:
     A json containing the pipeline structure
     """
-    return pipeline.to_json()
+    return controller.get_pipeline_to_json()
 
 
 @app.put("/pipeline")
@@ -34,8 +33,8 @@ def set_pipeline(pipeline_name: rq.PipelineName):
     Returns:
     A json containing the pipeline structure
     """
-    pipeline.from_json(pipeline_name)
-    return pipeline.to_json()
+    controller.set_pipeline_from_json(pipeline_name)
+    return controller.get_pipeline_to_json()
 
 
 @app.post("/segment")
@@ -59,6 +58,6 @@ def segmentation(email: rq.ThreadList):
                     - signature
                     - caution
     """
-    dataset = data.EmailDataset.from_json(email)
-    dataset.segment(pipeline)
-    return dataset.to_json()
+    controller.set_dataset_from_json(email)
+    controller.segment()
+    return controller.get_dataset_to_json()

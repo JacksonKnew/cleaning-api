@@ -2,6 +2,7 @@
 """
 from typing import List
 import tensorflow as tf
+import pandas as pd
 import json
 import re
 from tqdm import tqdm
@@ -84,11 +85,34 @@ class EmailThread:
         self.lines = self.email2list(text)
         self.messages = []
 
+    @classmethod
+    def from_lines(
+        cls, lines: List[str], labels: List[int] = None, fragments: List[int] = None
+    ):
+        obj = cls("")
+        obj.source = "\n".join(lines)
+        obj.lines = lines
+        if labels and fragments:
+            obj.segment(labels, fragments)
+        return obj
+
     def get_sequences(self, seq_len=64):
         """turn the list of lines into a list of lists of 64 lines (called sequences)"""
         return self.list2sequences(self.lines, seq_len=seq_len)
 
+    def get_label_sequences(self, seq_len=64):
+        """Get a list of sequences of labels
+
+        TODO: implement this method"""
+        pass
+
     def segment(self, cat_pred, frag_pred):
+        """segment the thread into messages using the output of a model
+
+        Arguments:
+            cat_pred {list} -- list of category predictions
+            frag_pred {list} -- list of fragment predictions
+        """
         message = []
         sections = []
         for line, cat, frag in zip(self.lines, cat_pred, frag_pred):
@@ -104,6 +128,7 @@ class EmailThread:
         if message:
             self.messages.append(EmailMessage(message))
             self.messages[-1].set_sections(sections)
+        return self
 
     @staticmethod
     def fix_formating(text):
@@ -151,7 +176,7 @@ class EmailThread:
 
     @classmethod
     def clean(cls, text, remove_html=True, email_forward=True):
-        """fixes formatting, html and other issues"""
+        """fixes formatting, html and other issues in a single character string"""
         text = str(text)
         if remove_html:
             text = re.sub(r"(<|\[)https?:\/\/.*(\.).*(>|\])", "", text, 0, re.M)
@@ -180,7 +205,7 @@ class EmailThread:
 
     @staticmethod
     def split(L, N):
-        """batches list L into N size chunks"""
+        """batches list L into N size chunks. Returns a generator"""
         for i in range(0, len(L), N):
             yield L[i : i + N]
 
@@ -219,55 +244,86 @@ class EmailDataset:
     seq_order: List[int]
     batch_size: int
     dataset: tf.data.Dataset
+    is_labeled: bool = False
 
-    def __init__(self, threads: List[str], batch_size=16):
-        self.threads = [EmailThread(thread) for thread in threads]
+    def __init__(
+        self,
+        threads: List[str],
+        batch_size=16,
+    ):
+        self.threads = [EmailThread(str(thread)) for thread in threads]
         self.build_dataset(batch_size)
+        self.is_labeled = False
 
     @classmethod
     def from_json(cls, json_str):
         return cls(dict(json_str)["threads"])
 
+    @classmethod
+    def from_csv(cls, csv_file):
+        """Create labeles dataset from csv file
+
+        Expected Columns in csv file:
+        - Email: email number to group lines by
+        - Text: text of the line of the email
+        - Label: label of the line of the email
+        - Fragment: fragment changes equal to 1 when the line corresponds to a new fragment
+        """
+        df = pd.read_csv(csv_file)
+        df["Text"] = df["Text"].astype(str)
+        df = df.groupby("Email").agg(
+            {
+                "Email": "first",
+                "Text": list,
+                "Label": list,
+                "Fragment": list,
+            }
+        )
+        threads = df["Text"].tolist()
+        labels = df["Label"].tolist()
+        fragments = df["Fragment"].tolist()
+        obj = cls([])
+        obj.threads = [
+            EmailThread.from_lines(thread).segment(label, fragment)
+            for thread, label, fragment in zip(threads, labels, fragments)
+        ]
+        obj.is_labeled = True
+        obj.build_dataset()
+        return obj
+
+    def get_tf_dataset(self):
+        return self.dataset
+
+    def to_csv(self, csv_file):
+        """Save dataset to csv file.
+
+        TODO: implement this method"""
+        pass
+
     def build_dataset(self, batch_size=16):
         sequences = [thread.get_sequences() for thread in self.threads]
         self.batch_size = batch_size
         self.seq_order = [i for i, seqs in enumerate(sequences) for seq in seqs]
-        self.dataset = tf.data.Dataset.from_tensor_slices(
-            [seq for seqs in sequences for seq in seqs]
-        ).batch(self.batch_size)
+        if self.is_labeled:
+            lab_sequences = [thread.get_label_sequences() for thread in self.threads]
+            self.dataset = tf.data.Dataset.from_tensor_slices(
+                (self._flatten_list(sequences), self._flatten_list(lab_sequences))
+            ).batch(self.batch_size)
+        else:
+            self.dataset = tf.data.Dataset.from_tensor_slices(
+                self._flatten_list(sequences)
+            ).batch(self.batch_size)
         return self
 
-    def _flatten_list(self, L):
+    @staticmethod
+    def _flatten_list(L):
         return [x for l in L for x in l]
 
-    def _chunks(self, lst, n):
+    @staticmethod
+    def _chunks(lst, n):
         """Yield successive n-sized chunks from lst."""
         for i in range(0, len(lst), n):
             yield lst[i : i + n]
-
-    def segment(self, pipeline):
-        """Used to segment all EmailThread objects in the dataset
-        pipeline must be a valid PipelineModel object
-
-        TODO: This function probably shouldn't be here and rather be part of some sort of controller
-        """
-        print("Segmenting emails...")
-        for batch, seq_order in tqdm(
-            zip(self.dataset, self._chunks(self.seq_order, self.batch_size))
-        ):
-            pred = pipeline(batch)
-            cat_pred = tf.argmax(pred[:, :, :7], axis=-1)
-            frag_pred = pred[:, :, -1]
-            concat_cat_pred = {seq: [] for seq in seq_order}
-            concat_frag_pred = {seq: [] for seq in seq_order}
-            for i, seq in enumerate(seq_order):
-                concat_cat_pred[seq].append(cat_pred[i])
-                concat_frag_pred[seq].append(frag_pred[i])
-            for key in concat_cat_pred.keys():
-                cat_pred, frag_pred = self._flatten_list(
-                    concat_cat_pred[key]
-                ), self._flatten_list(concat_frag_pred[key])
-                self.threads[key].segment(cat_pred, frag_pred)
 
     def to_dict(self):
         return {"threads": [thread.to_dict() for thread in self.threads]}

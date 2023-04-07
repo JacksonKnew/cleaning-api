@@ -8,3 +8,9 @@ class PipelineName(BaseModel):
 
 class ThreadList(BaseModel):
     threads: List[str]
+
+
+class LabeledDataset(BaseModel):
+    threads: List[str]
+    labels: List[int]
+    metrics: List[str]

@@ -124,10 +124,9 @@ class EncoderModel:
 
         # normalizes the embeddings if wanted
         if normalize:
-            embeddings = tf.convert_to_tensor(
-                [self.normalize(embedding) for embedding in embeddings], tf.float32
-            )
-        return embeddings
+            embeddings = [self.normalize(embedding) for embedding in embeddings]
+
+        return tf.convert_to_tensor(embeddings, tf.float32)
 
     def mean_pooling(self, model_output, attention_mask):
         """Pool the model output to get one fixed sized sentence vector"""
@@ -147,6 +146,7 @@ class EncoderModel:
         )
 
     def normalize(self, embeddings):
+        """Normalizes the embeddings. Uses L2 norm."""
         embeddings, _ = tf.linalg.normalize(embeddings, 2, axis=1)
         return embeddings
 
