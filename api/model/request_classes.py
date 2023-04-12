@@ -14,3 +14,10 @@ class LabeledDataset(BaseModel):
     threads: List[str]
     labels: List[int]
     metrics: List[str]
+
+
+class TrainRequest(BaseModel):
+    model_name: str
+    metrics: List[str]
+    loss_weights: List[float]
+    epochs: int

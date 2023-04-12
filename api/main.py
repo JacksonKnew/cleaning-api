@@ -63,3 +63,23 @@ def segmentation(email: rq.ThreadList):
     controller.set_dataset_from_json(email)
     controller.segment()
     return controller.get_dataset_to_json()
+
+
+@app.post("/train")
+def train(train_request: rq.TrainRequest):
+    """POST at /train
+    This endpoint serves to train a model
+
+    Expected arguments:
+    - model_name: name of the model to train
+    - metrics: list of metrics to use for training
+    - loss_weights: list of weights to use for each metric
+    - epochs: number of epochs to train for
+
+    Returns:
+    - model_name: name of the trained model
+    - metrics: final list of metrics for trained model
+    - loss: final loss for trained model
+    - epochs: number of epochs trained for
+    """
+    pass

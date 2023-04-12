@@ -6,8 +6,9 @@ import pandas as pd
 import json
 import re
 import model.request_classes as rq
+from utils.data_manipulation import flatten_list, batch_list
 
-from config import PREPROCESSING
+from config import PREPROCESSING, SECTIONS
 
 
 class EmailMessage:
@@ -21,16 +22,6 @@ class EmailMessage:
 
     lines: List[str]
     sections: List[int]
-
-    sections_dict = {
-        "full": [i for i in range(1, 6)],
-        "header": [1],
-        "disclaimer": [2],
-        "greetings": [3],
-        "body": [4],
-        "signature": [5],
-        "caution": [6],
-    }
 
     def __init__(self, lines: List[str]) -> None:
         self.lines = lines
@@ -47,22 +38,14 @@ class EmailMessage:
                 [
                     line
                     for line, sec in zip(self.lines, self.sections)
-                    if sec in self.sections_dict[section]
+                    if sec in SECTIONS[section]
                 ]
             ).strip("\n")
         else:
             raise Exception("Sections not set")
 
     def to_dict(self) -> dict:
-        return {
-            "full": self.get("full"),
-            "header": self.get("header"),
-            "disclaimer": self.get("disclaimer"),
-            "greetings": self.get("greetings"),
-            "body": self.get("body"),
-            "signature": self.get("signature"),
-            "caution": self.get("caution"),
-        }
+        return {section: self.get(section) for section in SECTIONS.keys()}
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict())
@@ -158,19 +141,13 @@ class EmailThread:
         return email_list
 
     @staticmethod
-    def split(L: list, N: int) -> Generator[list, None, None]:
-        """batches list L into N size chunks. Returns a generator"""
-        for i in range(0, len(L), N):
-            yield L[i : i + N]
-
-    @classmethod
     def list2sequences(
-        cls, email_list: list, seq_len: int = 64, padding: Any = ""
+        email_list: list, seq_len: int = 64, padding: Any = ""
     ) -> List[list]:
         """Creates sequences of specified length with padding for the last one"""
         inp_len = len(email_list)
         left = inp_len % seq_len
-        inputs = [part for part in cls.split(email_list, seq_len)]
+        inputs = [part for part in batch_list(email_list, seq_len)]
         if left != 0:
             pad = [padding] * (seq_len - left)
             inputs[-1] += pad
@@ -263,17 +240,13 @@ class EmailDataset:
         if self.is_labeled:
             lab_sequences = [thread.get_label_sequences() for thread in self.threads]
             self.dataset = tf.data.Dataset.from_tensor_slices(
-                (self._flatten_list(sequences), self._flatten_list(lab_sequences))
+                (flatten_list(sequences), flatten_list(lab_sequences))
             ).batch(self.batch_size)
         else:
             self.dataset = tf.data.Dataset.from_tensor_slices(
-                self._flatten_list(sequences)
+                flatten_list(sequences)
             ).batch(self.batch_size)
         return self
-
-    @staticmethod
-    def _flatten_list(L: List[List[Any]]) -> List[Any]:
-        return [x for l in L for x in l]
 
     def to_dict(self) -> dict:
         return {"threads": [thread.to_dict() for thread in self.threads]}

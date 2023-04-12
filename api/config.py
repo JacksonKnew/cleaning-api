@@ -1,3 +1,13 @@
+SECTIONS = {
+    "full": [i for i in range(1, 6)],
+    "header": [1],
+    "disclaimer": [2],
+    "greetings": [3],
+    "body": [4],
+    "signature": [5],
+    "caution": [6],
+}
+
 MODELS = {
     "default": {
         "encoder": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
