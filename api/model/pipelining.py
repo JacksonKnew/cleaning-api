@@ -1,11 +1,13 @@
 import json
+import logging
 import re
 import tensorflow as tf
+from typing import List, Generator, Any
+import model.request_classes as rq
 from keras.layers import Bidirectional, GRU, Dropout, Dense, Concatenate
 from transformers import TFAutoModel, AutoTokenizer
 
-with open("./models.json", "r") as f:
-    MODELS = json.load(f)
+from config import MODELS, FEATURE_REGEX
 
 
 class ExtractorModel:
@@ -22,78 +24,25 @@ class ExtractorModel:
     - full_caps
     """
 
-    def __init__(self, features_list):
-        self.features_dict = {
-            "phone_number": self.extract_phone_number,
-            "url": self.extract_url,
-            "punctuation": self.extract_punctuation,
-            "horizontal_separator": self.extract_horizontal_separators,
-            "hashtag": self.extract_hashtags,
-            "pipe": self.extract_pipes,
-            "email": self.extract_email,
-            "capitalized": self.extract_capitalized,
-            "full_caps": self.extract_full_caps,
-        }
-        self.features_list = [self.features_dict[feature] for feature in features_list]
+    def __init__(self, features_list: List[str]) -> None:
+        self.regex_list = [FEATURE_REGEX[feature] for feature in features_list]
 
-    def __call__(self, inputs):
+    def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
         feats = []
         for sequence in inputs.numpy():
             feats.append([])
             for line in sequence:
                 feats[-1].append(
-                    [feature(line.decode("utf-8")) for feature in self.features_list]
+                    [
+                        self.extract_feature(line.decode("utf-8"), regex)
+                        for regex in self.regex_list
+                    ]
                 )
         return tf.convert_to_tensor(feats, dtype=tf.float32)
 
     @staticmethod
-    def extract_phone_number(text):
-        phone_regex = re.compile(
-            "^\\+?\\d{1,4}?[-.\\s]?\\(?\\d{1,3}?\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}$"
-        )
-        return len(re.findall(phone_regex, text))
-
-    @staticmethod
-    def extract_url(text):
-        url_regex = re.compile(
-            "^https?:\\/\\/(?:www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}\\b(?:[-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)$"
-        )
-        return len(re.findall(url_regex, text))
-
-    @staticmethod
-    def extract_punctuation(text):
-        punct_regex = re.compile("[!?]")
-        return len(re.findall(punct_regex, text))
-
-    @staticmethod
-    def extract_horizontal_separators(text):
-        special_regex = re.compile("[-=~]")
-        return len(re.findall(special_regex, text))
-
-    @staticmethod
-    def extract_hashtags(text):
-        hashtag_regex = re.compile("[#]")
-        return len(re.findall(hashtag_regex, text))
-
-    @staticmethod
-    def extract_pipes(text):
-        pipes_regex = re.compile("[|]")
-        return len(re.findall(pipes_regex, text))
-
-    @staticmethod
-    def extract_email(text):
-        email_regex = re.compile("[-\w\.]+@([-\w]+\.)+[-\w]{2,4}")
-        return len(re.findall(email_regex, text))
-
-    @staticmethod
-    def extract_capitalized(text):
-        capitalized_regex = re.compile("[A-Z][a-z]*")
-        return len(re.findall(capitalized_regex, text))
-
-    @staticmethod
-    def extract_full_caps(text):
-        full_caps_regex = re.compile("[A-Z]+")
-        return len(re.findall(full_caps_regex, text))
+    def extract_feature(text: str, regex: str) -> int:
+        return len(re.findall(regex, text))
 
 
 class EncoderModel:
@@ -101,12 +50,12 @@ class EncoderModel:
     specify model_name_or_path with the name of the model you want to use from hugging face.
     """
 
-    def __init__(self, model_name_or_path, **kwargs):
+    def __init__(self, model_name_or_path: str) -> None:
         # loads transformers model
         self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-        self.model = TFAutoModel.from_pretrained(model_name_or_path, **kwargs)
+        self.model = TFAutoModel.from_pretrained(model_name_or_path)
 
-    def __call__(self, inputs, normalize=True):
+    def __call__(self, inputs: tf.Tensor, normalize: bool = True) -> tf.Tensor:
         tokenized = [
             self.tokenizer(
                 [line.decode("utf-8") for line in lines],
@@ -128,7 +77,9 @@ class EncoderModel:
 
         return tf.convert_to_tensor(embeddings, tf.float32)
 
-    def mean_pooling(self, model_output, attention_mask):
+    def mean_pooling(
+        self, model_output: tf.Tensor, attention_mask: tf.Tensor
+    ) -> tf.Tensor:
         """Pool the model output to get one fixed sized sentence vector"""
         token_embeddings = model_output[
             0
@@ -145,7 +96,7 @@ class EncoderModel:
             tf.math.reduce_sum(input_mask_expanded, axis=1), 1e-9, tf.float32.max
         )
 
-    def normalize(self, embeddings):
+    def normalize(self, embeddings: tf.Tensor) -> tf.Tensor:
         """Normalizes the embeddings. Uses L2 norm."""
         embeddings, _ = tf.linalg.normalize(embeddings, 2, axis=1)
         return embeddings
@@ -156,11 +107,11 @@ class FeatureCreator:
     Give the name of the encoder model you want to use and the list of features you want to extract.
     Refer to the documentation of EncoderModel and ExtractorModel for more information."""
 
-    def __init__(self, encoder_name, features_list):
+    def __init__(self, encoder_name: str, features_list: List[str]) -> None:
         self.encoder = EncoderModel(encoder_name)
         self.extractor = ExtractorModel(features_list)
 
-    def __call__(self, inputs):
+    def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
         encoded = self.encoder(inputs)
         extracted = self.extractor(inputs)
         return tf.concat([encoded, extracted], axis=-1)
@@ -170,24 +121,26 @@ class ClassifierModel:
     """Classifies sequences of embeddings. Uses a RNN model.
     Specify classifier_name with the name of the model you want to use from the weights folder."""
 
-    def __init__(self, classifier_name, n_extracted):
+    def __init__(
+        self, classifier_name: str, n_encoded: int, n_extracted: int, seq_len: int = 64
+    ) -> None:
 
-        n_features = 384 + n_extracted
+        n_features = n_encoded + n_extracted
 
-        i = tf.keras.Input(shape=(64, n_features))
+        i = tf.keras.Input(shape=(seq_len, n_features))
 
-        i = tf.keras.layers.Reshape((64, n_features, 1), input_shape=(64, n_features))(
-            i
-        )
+        i = tf.keras.layers.Reshape(
+            (seq_len, n_features, 1), input_shape=(seq_len, n_features)
+        )(i)
 
         first_half = tf.keras.layers.Cropping2D(cropping=((0, 0), (0, n_extracted)))(i)
-        first_half = tf.keras.layers.Reshape((64, 384), input_shape=(64, 384, 1))(
-            first_half
-        )
+        first_half = tf.keras.layers.Reshape(
+            (seq_len, n_encoded), input_shape=(seq_len, n_encoded, 1)
+        )(first_half)
 
-        second_half = tf.keras.layers.Cropping2D(cropping=((0, 0), (384, 0)))(i)
+        second_half = tf.keras.layers.Cropping2D(cropping=((0, 0), (n_encoded, 0)))(i)
         second_half = tf.keras.layers.Reshape(
-            (64, n_extracted), input_shape=(64, n_extracted, 1)
+            (seq_len, n_extracted), input_shape=(seq_len, n_extracted, 1)
         )(second_half)
 
         second_half = Dense(128, activation="relu")(second_half)
@@ -207,7 +160,7 @@ class ClassifierModel:
         self.classifier = tf.keras.Model(inputs=i, outputs=x)
         self.classifier.load_weights(f"./weights/{classifier_name}.h5")
 
-    def __call__(self, inputs):
+    def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
         return self.classifier(inputs)
 
 
@@ -215,27 +168,29 @@ class PipelineModel:
     """Combines the encoder, the extractor and the classifier.
     Specify model_name with the name of the model you want to use from the MODELS dictionary (or models.json file)."""
 
-    def __init__(self, model_name):
-        print("Creating model pipeline...")
+    def __init__(self, model_name: str) -> None:
+        logging.info("Creating model pipeline...")
         self.parameters = MODELS[model_name]
         self.encoder = FeatureCreator(
             self.parameters["encoder"], self.parameters["features_list"]
         )
         self.classifier = ClassifierModel(
-            self.parameters["classifier"], len(self.parameters["features_list"])
+            self.parameters["classifier"],
+            self.parameters["encoder_dim"],
+            len(self.parameters["features_list"]),
         )
-        print("Done!")
+        logging.info("Model pipeline created.")
 
-    def from_json(self, payload):
+    def from_json(self, payload: rq.PipelineName):
         self.__init__(dict(payload)["name"])
 
-    def __call__(self, inputs):
+    def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
         with tf.device("GPU"):
             result = self.classifier(self.encoder(inputs))
         return result
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return self.parameters
 
-    def to_json(self):
+    def to_json(self) -> str:
         return json.dumps(self.to_dict())

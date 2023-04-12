@@ -1,11 +1,13 @@
 """This file defines the usefull data types for the api
 """
-from typing import List
+from typing import List, Generator, Any
 import tensorflow as tf
 import pandas as pd
 import json
 import re
-from tqdm import tqdm
+import model.request_classes as rq
+
+from config import PREPROCESSING
 
 
 class EmailMessage:
@@ -30,13 +32,13 @@ class EmailMessage:
         "caution": [6],
     }
 
-    def __init__(self, lines: List[str]):
+    def __init__(self, lines: List[str]) -> None:
         self.lines = lines
 
-    def set_sections(self, sections_list: List[int]):
+    def set_sections(self, sections_list: List[int]) -> None:
         self.sections = sections_list
 
-    def get(self, section):
+    def get(self, section: str) -> str:
         """Get the text associated to a given section of the message
         raises an exception if set_sections has not been called yet
         """
@@ -51,7 +53,7 @@ class EmailMessage:
         else:
             raise Exception("Sections not set")
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "full": self.get("full"),
             "header": self.get("header"),
@@ -62,7 +64,7 @@ class EmailMessage:
             "caution": self.get("caution"),
         }
 
-    def to_json(self):
+    def to_json(self) -> str:
         return json.dumps(self.to_dict())
 
 
@@ -79,16 +81,16 @@ class EmailThread:
     lines: List[str]
     messages: List[EmailMessage]
 
-    def __init__(self, text: str):
+    def __init__(self, text: str) -> None:
         self.source = text
-        text = self.clean(text)
+        text = self.fix_formating(text)
         self.lines = self.email2list(text)
         self.messages = []
 
     @classmethod
     def from_lines(
         cls, lines: List[str], labels: List[int] = None, fragments: List[int] = None
-    ):
+    ) -> "EmailThread":
         obj = cls("")
         obj.source = "\n".join(lines)
         obj.lines = lines
@@ -96,17 +98,17 @@ class EmailThread:
             obj.segment(labels, fragments)
         return obj
 
-    def get_sequences(self, seq_len=64):
+    def get_sequences(self, seq_len: int = 64) -> List[List[str]]:
         """turn the list of lines into a list of lists of 64 lines (called sequences)"""
         return self.list2sequences(self.lines, seq_len=seq_len)
 
-    def get_label_sequences(self, seq_len=64):
+    def get_label_sequences(self, seq_len: int = 64) -> List[List[int]]:
         """Get a list of sequences of labels
 
         TODO: implement this method"""
-        pass
+        raise NotImplementedError
 
-    def segment(self, cat_pred, frag_pred):
+    def segment(self, cat_pred: List[int], frag_pred: List[float]) -> "EmailThread":
         """segment the thread into messages using the output of a model
 
         Arguments:
@@ -131,71 +133,23 @@ class EmailThread:
         return self
 
     @staticmethod
-    def fix_formating(text):
+    def fix_formating(text: str) -> str:
         """fixes common formatting errors"""
         text = str(text)
-        text = text.replace("\\xa333", " ")
-        text = text.replace("\\u2019", "'")
-        text = text.replace("\r\n\t\t", "")
-        text = text.replace(" B7; ", "")
-        text = text.replace("\\xb4", "'")
-        text = text.replace("&#43;", "+")
-        text = text.replace("\\xa0", " ")
-        text = text.replace("\\xa0", " ")
-        text = text.replace("f\\xfcr", "'s")
-        text = text.replace("\\xa", " x")
-        text = text.replace("_x000D_", "")
-        text = text.replace("x000D", "\n")
-        text = text.replace(".à", " a")
-        text = text.replace(" ", "")
-        text = text.replace("‎", "")
-        text = text.replace("­", "")
-        text = text.replace("﻿", "")
-        text = text.replace("&nbsp;", "")
-        text = text.replace("&#43;", "")
-        text = text.replace("&lt;", "<")
-        text = text.replace("&quot;", '"')
-        text = text.replace("&gt;", ">")
-        text = text.replace("ï»¿", "")
-        text = text.replace("...", ".")
-        text = text.replace("..", ".")
-        text = text.replace(" .", ". ")
-        text = text.replace("\r\n", "\n")
-        text = text.replace("\xa0", " ")
-        text = text.replace("：", ": ")
-        text = text.replace("\u200b", "")
-        text = text.replace("\u2026", "...")
-        text = text.replace("’", "'")
-        text = text.replace("...", ".")
-        text = text.replace("..", ".")
-        text = re.sub(r":\s+", ": ", text)
-        text = text.replace(" .", ". ")
-        text = re.sub(r":\s?\.", ":", text)
-
+        for replacement in PREPROCESSING["text_replacements"]:
+            text = text.replace(replacement["pattern"], replacement["replacement"])
+        for replacement in PREPROCESSING["regex_replacements"]:
+            text = re.sub(
+                replacement["pattern"],
+                replacement["replacement"],
+                text,
+                0,
+                re.MULTILINE,
+            )
         return text.strip("\n").strip().strip("\n")
 
-    @classmethod
-    def clean(cls, text, remove_html=True, email_forward=True):
-        """fixes formatting, html and other issues in a single character string"""
-        text = str(text)
-        if remove_html:
-            text = re.sub(r"(<|\[)https?:\/\/.*(\.).*(>|\])", "", text, 0, re.M)
-            text = re.sub(r"(?:[^\r\n\t\f\v]*{[^{}]*})+", "", text, 0, re.MULTILINE)
-            text = re.sub(r"(?:[^\r\n\t\f\v]*{[^{}]*})+", "", text, 0, re.MULTILINE)
-            text = re.sub(
-                r"[^\r\n\t\f\v]*\s*(\}|\{)\s*|@import.*", "", text, 0, re.MULTILINE
-            )
-            text = re.sub(r"\/\*[^*]*\*+([^/*][^*]*\*+)*\/", "", text, 0, re.MULTILINE)
-        text = cls.fix_formating(text).strip()
-        text = re.sub(r"^(\s*\|\s+)+", "", text)
-        text = re.sub(r"\[cid:.*\]", "", text, 0, re.MULTILINE)
-
-        if email_forward:
-            text = re.sub(r"^>+[ ]*", "", text, 0, re.MULTILINE)
-        return text
-
     @staticmethod
-    def email2list(email):
+    def email2list(email: str) -> List[str]:
         """transforms a character string to a list of lines (deletes blank lines)"""
         email_list = email.split("\n")
         for i in range(len(email_list) - 1, -1, -1):
@@ -204,13 +158,15 @@ class EmailThread:
         return email_list
 
     @staticmethod
-    def split(L, N):
+    def split(L: list, N: int) -> Generator[list, None, None]:
         """batches list L into N size chunks. Returns a generator"""
         for i in range(0, len(L), N):
             yield L[i : i + N]
 
     @classmethod
-    def list2sequences(cls, email_list, seq_len=64, padding=""):
+    def list2sequences(
+        cls, email_list: list, seq_len: int = 64, padding: Any = ""
+    ) -> List[list]:
         """Creates sequences of specified length with padding for the last one"""
         inp_len = len(email_list)
         left = inp_len % seq_len
@@ -220,13 +176,13 @@ class EmailThread:
             inputs[-1] += pad
         return inputs
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {
             "source": self.source,
             "messages": [message.to_dict() for message in self.messages],
         }
 
-    def to_json(self):
+    def to_json(self) -> str:
         return json.dumps(self.to_dict())
 
 
@@ -256,11 +212,11 @@ class EmailDataset:
         self.is_labeled = False
 
     @classmethod
-    def from_json(cls, json_str):
+    def from_json(cls, json_str: rq.ThreadList) -> "EmailDataset":
         return cls(dict(json_str)["threads"])
 
     @classmethod
-    def from_csv(cls, csv_file):
+    def from_csv(cls, csv_file: str) -> "EmailDataset":
         """Create labeles dataset from csv file
 
         Expected Columns in csv file:
@@ -291,16 +247,16 @@ class EmailDataset:
         obj.build_dataset()
         return obj
 
-    def get_tf_dataset(self):
+    def get_tf_dataset(self) -> tf.data.Dataset:
         return self.dataset
 
-    def to_csv(self, csv_file):
+    def to_csv(self, csv_file: str) -> None:
         """Save dataset to csv file.
 
         TODO: implement this method"""
         pass
 
-    def build_dataset(self, batch_size=16):
+    def build_dataset(self, batch_size: int = 16) -> "EmailDataset":
         sequences = [thread.get_sequences() for thread in self.threads]
         self.batch_size = batch_size
         self.seq_order = [i for i, seqs in enumerate(sequences) for seq in seqs]
@@ -316,17 +272,11 @@ class EmailDataset:
         return self
 
     @staticmethod
-    def _flatten_list(L):
+    def _flatten_list(L: List[List[Any]]) -> List[Any]:
         return [x for l in L for x in l]
 
-    @staticmethod
-    def _chunks(lst, n):
-        """Yield successive n-sized chunks from lst."""
-        for i in range(0, len(lst), n):
-            yield lst[i : i + n]
-
-    def to_dict(self):
+    def to_dict(self) -> dict:
         return {"threads": [thread.to_dict() for thread in self.threads]}
 
-    def to_json(self):
+    def to_json(self) -> str:
         return json.dumps(self.to_dict())

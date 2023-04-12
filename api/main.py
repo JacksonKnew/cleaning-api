@@ -1,5 +1,7 @@
 import os
+import logging
 
+logging.basicConfig(level=logging.INFO)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 from fastapi import FastAPI
