@@ -3,7 +3,7 @@ import logging
 import re
 import tensorflow as tf
 from typing import List, Generator, Any
-import model.request_classes as rq
+import utils.request_classes as rq
 from keras.layers import Bidirectional, GRU, Dropout, Dense, Concatenate
 from transformers import TFAutoModel, AutoTokenizer
 
@@ -45,42 +45,29 @@ class ExtractorModel:
         return len(re.findall(regex, text))
 
 
-class EncoderModel:
-    """Encodes text into embeddings. Uses transformers models.
-    specify model_name_or_path with the name of the model you want to use from hugging face.
-    """
+class BareEncoder(tf.keras.layers.Layer):
+    model: TFAutoModel
 
-    def __init__(self, model_name_or_path: str) -> None:
+    def __init__(self, model_name_or_path, **kwargs):
+        super(BareEncoder, self).__init__()
         # loads transformers model
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
-        self.model = TFAutoModel.from_pretrained(model_name_or_path)
+        self.model = TFAutoModel.from_pretrained(model_name_or_path, **kwargs)
 
-    def __call__(self, inputs: tf.Tensor, normalize: bool = True) -> tf.Tensor:
-        tokenized = [
-            self.tokenizer(
-                [line.decode("utf-8") for line in lines],
-                padding=True,
-                truncation=True,
-                return_tensors="tf",
-            )
-            for lines in inputs.numpy()
-        ]
+    def call(self, inputs, normalize=True):
         # runs model on inputs
-        embeddings = [
-            self.mean_pooling(self.model(tokens), tokens["attention_mask"])
-            for tokens in tokenized
-        ]
-
+        model_output = self.model(inputs)  # type: ignore
+        # Perform pooling. In this case, mean pooling.
+        try:
+            mask = inputs["attention_mask"]
+        except TypeError:
+            mask = inputs[2]
+        embeddings = self.mean_pooling(model_output, mask)
         # normalizes the embeddings if wanted
         if normalize:
-            embeddings = [self.normalize(embedding) for embedding in embeddings]
+            embeddings = self.normalize(embeddings)
+        return embeddings
 
-        return tf.convert_to_tensor(embeddings, tf.float32)
-
-    def mean_pooling(
-        self, model_output: tf.Tensor, attention_mask: tf.Tensor
-    ) -> tf.Tensor:
-        """Pool the model output to get one fixed sized sentence vector"""
+    def mean_pooling(self, model_output, attention_mask):
         token_embeddings = model_output[
             0
         ]  # First element of model_output contains all token embeddings
@@ -96,10 +83,37 @@ class EncoderModel:
             tf.math.reduce_sum(input_mask_expanded, axis=1), 1e-9, tf.float32.max
         )
 
-    def normalize(self, embeddings: tf.Tensor) -> tf.Tensor:
-        """Normalizes the embeddings. Uses L2 norm."""
+    def normalize(self, embeddings):
         embeddings, _ = tf.linalg.normalize(embeddings, 2, axis=1)
         return embeddings
+
+
+class EncoderModel:
+    """Encodes text into embeddings. Uses transformers models.
+    specify model_name_or_path with the name of the model you want to use from hugging face.
+    """
+
+    tokenizer: AutoTokenizer
+    model: BareEncoder
+
+    def __init__(self, model_name_or_path: str) -> None:
+        # loads transformers model
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)  # type: ignore
+        self.model = BareEncoder(model_name_or_path)
+
+    def __call__(self, inputs: tf.Tensor, normalize: bool = True) -> tf.Tensor:
+        tokenized = [
+            self.tokenizer(
+                [line.decode("utf-8") for line in lines],
+                padding=True,
+                truncation=True,
+                return_tensors="tf",
+            )  # type: ignore
+            for lines in inputs.numpy()  # type: ignore
+        ]
+        return tf.convert_to_tensor(
+            [self.model(token) for token in tokenized], dtype=tf.float32  # type: ignore
+        )
 
 
 class FeatureCreator:

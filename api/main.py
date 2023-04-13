@@ -1,15 +1,10 @@
-import os
 import logging
-
-logging.basicConfig(level=logging.INFO)
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
 from fastapi import FastAPI
 import control.control as ctrl
-import model.request_classes as rq
+import utils.request_classes as rq
 
+logging.basicConfig(level=logging.INFO)
 app = FastAPI()
-
 controller = ctrl.Controller()
 
 
@@ -65,21 +60,29 @@ def segmentation(email: rq.ThreadList):
     return controller.get_dataset_to_json()
 
 
-@app.post("/train")
-def train(train_request: rq.TrainRequest):
+@app.put("/train_classifier")
+def train_classifier(train_request: rq.TrainRequest):
     """POST at /train
-    This endpoint serves to train a model
+    This endpoint serves to train the classifier of the current model
 
     Expected arguments:
-    - model_name: name of the model to train
-    - metrics: list of metrics to use for training
-    - loss_weights: list of weights to use for each metric
+    - csv_path: path to csv file containing the training data
     - epochs: number of epochs to train for
-
-    Returns:
-    - model_name: name of the trained model
-    - metrics: final list of metrics for trained model
-    - loss: final loss for trained model
-    - epochs: number of epochs trained for
     """
-    pass
+    controller.set_dataset_from_csv(train_request.csv_path)
+    controller.train_classifier(train_request.epochs)
+    return controller.get_pipeline_to_json()
+
+
+@app.put("/train_encoder")
+def train_encoder(train_request: rq.TrainRequest):
+    """POST at /train
+    This endpoint serves to train the encoder of the current model
+
+    Expected arguments:
+    - csv_path: path to csv file containing the training data
+    - epochs: number of epochs to train for
+    """
+    controller.set_line_dataset_from_csv(train_request.csv_path)
+    controller.train_encoder(train_request.epochs)
+    return controller.get_pipeline_to_json()

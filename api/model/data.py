@@ -5,7 +5,7 @@ import tensorflow as tf
 import pandas as pd
 import json
 import re
-import model.request_classes as rq
+import utils.request_classes as rq
 from utils.data_manipulation import flatten_list, batch_list
 
 from config import PREPROCESSING, SECTIONS
@@ -72,7 +72,10 @@ class EmailThread:
 
     @classmethod
     def from_lines(
-        cls, lines: List[str], labels: List[int] = None, fragments: List[int] = None
+        cls,
+        lines: List[str],
+        labels: List[int] = [],
+        fragments: List[float] = [],
     ) -> "EmailThread":
         obj = cls("")
         obj.source = "\n".join(lines)
@@ -86,10 +89,12 @@ class EmailThread:
         return self.list2sequences(self.lines, seq_len=seq_len)
 
     def get_label_sequences(self, seq_len: int = 64) -> List[List[int]]:
-        """Get a list of sequences of labels
-
-        TODO: implement this method"""
-        raise NotImplementedError
+        """Get a list of sequences of labels"""
+        return self.list2sequences(
+            flatten_list([m.sections for m in self.messages]),
+            padding=0,
+            seq_len=seq_len,
+        )
 
     def segment(self, cat_pred: List[int], frag_pred: List[float]) -> "EmailThread":
         """segment the thread into messages using the output of a model
@@ -107,9 +112,8 @@ class EmailThread:
                     self.messages[-1].set_sections(sections)
                 message = []
                 sections = []
-            else:
-                message.append(line)
-                sections.append(cat)
+            message.append(line)
+            sections.append(cat)
         if message:
             self.messages.append(EmailMessage(message))
             self.messages[-1].set_sections(sections)
@@ -194,7 +198,7 @@ class EmailDataset:
 
     @classmethod
     def from_csv(cls, csv_file: str) -> "EmailDataset":
-        """Create labeles dataset from csv file
+        """Create labeled dataset from csv file
 
         Expected Columns in csv file:
         - Email: email number to group lines by
@@ -206,15 +210,14 @@ class EmailDataset:
         df["Text"] = df["Text"].astype(str)
         df = df.groupby("Email").agg(
             {
-                "Email": "first",
                 "Text": list,
-                "Label": list,
-                "Fragment": list,
+                "Section": list,
+                "FragmentChange": list,
             }
         )
         threads = df["Text"].tolist()
-        labels = df["Label"].tolist()
-        fragments = df["Fragment"].tolist()
+        labels = df["Section"].tolist()
+        fragments = df["FragmentChange"].tolist()
         obj = cls([])
         obj.threads = [
             EmailThread.from_lines(thread).segment(label, fragment)
@@ -231,14 +234,18 @@ class EmailDataset:
         """Save dataset to csv file.
 
         TODO: implement this method"""
-        pass
+        raise NotImplementedError
 
     def build_dataset(self, batch_size: int = 16) -> "EmailDataset":
         sequences = [thread.get_sequences() for thread in self.threads]
         self.batch_size = batch_size
-        self.seq_order = [i for i, seqs in enumerate(sequences) for seq in seqs]
+        self.seq_order = [i for i, seqs in enumerate(sequences) for _ in seqs]
         if self.is_labeled:
             lab_sequences = [thread.get_label_sequences() for thread in self.threads]
+            for i, seqs in enumerate(lab_sequences):
+                if len(seqs) != len(sequences[i]):
+                    print(seqs)
+                    print(sequences[i])
             self.dataset = tf.data.Dataset.from_tensor_slices(
                 (flatten_list(sequences), flatten_list(lab_sequences))
             ).batch(self.batch_size)
@@ -253,3 +260,32 @@ class EmailDataset:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict())
+
+
+class EmailLineDataset:
+    dataset: tf.data.Dataset
+
+    def __init__(self):
+        pass
+
+    @classmethod
+    def from_csv(cls, csv_file: str) -> "EmailLineDataset":
+        """Create labeled dataset from csv file
+
+        Expected Columns in csv file:
+        - Email: email number to group lines by
+        - Text: text of the line of the email
+        - Label: label of the line of the email
+        - Fragment: fragment changes equal to 1 when the line corresponds to a new fragment
+        """
+        df = pd.read_csv(csv_file)
+        df["Text"] = df["Text"].astype(str)
+
+        threads = df["Text"].tolist()
+        labels = df["Section"].tolist()
+        obj = cls()
+        obj.dataset = tf.data.Dataset.from_tensor_slices((threads, labels)).batch(3)
+        return obj
+
+    def get_tf_dataset(self) -> tf.data.Dataset:
+        return self.dataset

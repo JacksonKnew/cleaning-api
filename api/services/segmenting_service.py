@@ -15,8 +15,8 @@ def segment(dataset: data.EmailDataset, pipeline: pipe.PipelineModel) -> None:
         batch_list(dataset.seq_order, dataset.batch_size),
     ):
         pred = pipeline(batch)
-        cat_pred = tf.argmax(pred[:, :, :7], axis=-1)
-        frag_pred = pred[:, :, -1]
+        cat_pred = tf.argmax(pred[:, :, :7], axis=-1)  # type: ignore
+        frag_pred = pred[:, :, -1]  # type: ignore
         concat_cat_pred = {seq: [] for seq in seq_order}
         concat_frag_pred = {seq: [] for seq in seq_order}
         for i, seq in enumerate(seq_order):

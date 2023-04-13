@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel
 
 
@@ -17,7 +17,5 @@ class LabeledDataset(BaseModel):
 
 
 class TrainRequest(BaseModel):
-    model_name: str
-    metrics: List[str]
-    loss_weights: List[float]
+    csv_path: str
     epochs: int
