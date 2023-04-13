@@ -3,6 +3,7 @@ import tensorflow as tf
 import model.data as data
 import model.pipelining as pipe
 from utils.data_manipulation import flatten_list, batch_list
+from config import DEVICE
 
 
 def segment(dataset: data.EmailDataset, pipeline: pipe.PipelineModel) -> None:
@@ -14,7 +15,8 @@ def segment(dataset: data.EmailDataset, pipeline: pipe.PipelineModel) -> None:
         dataset.get_tf_dataset(),
         batch_list(dataset.seq_order, dataset.batch_size),
     ):
-        pred = pipeline(batch)
+        with tf.device(DEVICE):
+            pred = pipeline(batch)
         cat_pred = tf.argmax(pred[:, :, :7], axis=-1)  # type: ignore
         frag_pred = pred[:, :, -1]  # type: ignore
         concat_cat_pred = {seq: [] for seq in seq_order}

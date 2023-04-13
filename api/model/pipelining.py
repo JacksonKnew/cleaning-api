@@ -199,8 +199,7 @@ class PipelineModel:
         self.__init__(dict(payload)["name"])
 
     def __call__(self, inputs: tf.Tensor) -> tf.Tensor:
-        with tf.device("GPU"):
-            result = self.classifier(self.encoder(inputs))
+        result = self.classifier(self.encoder(inputs))
         return result
 
     def to_dict(self) -> dict:

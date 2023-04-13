@@ -3,6 +3,7 @@ import tensorflow as tf
 import model.data as data
 import model.pipelining as pipe
 from transformers import AutoTokenizer
+from config import DEVICE
 
 
 def train_classifier(train_dataset: data.EmailDataset, pipeline: pipe.PipelineModel, epochs:int=1) -> None:
@@ -23,7 +24,7 @@ def train_classifier(train_dataset: data.EmailDataset, pipeline: pipe.PipelineMo
 
     feature_generator = _get_generator(tf_dataset, feature_creator)
     classifier.classifier.compile(optimizer="adam", loss="sparse_categorical_crossentropy", metrics=["accuracy"])
-    with tf.device("GPU"): # type: ignore
+    with tf.device(DEVICE): # type: ignore
         classifier.classifier.fit(feature_generator(), epochs=epochs)
     logging.info("Training complete")
 
@@ -65,7 +66,7 @@ def train_encoder(train_dataset: data.EmailLineDataset, encoder: pipe.EncoderMod
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
     clf.compile(optimizer=optimizer, loss="sparse_categorical_crossentropy")
-    with tf.device("GPU"): # type: ignore
+    with tf.device(DEVICE): # type: ignore
         clf.fit(feature_generator, epochs=epochs)
     logging.info("Training complete")
 

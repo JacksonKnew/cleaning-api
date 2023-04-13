@@ -1,3 +1,7 @@
+import tensorflow as tf
+
+DEVICE = "GPU" if tf.config.list_physical_devices("GPU") else "CPU"
+
 SECTIONS = {
     "full": [i for i in range(1, 6)],
     "header": [1],
